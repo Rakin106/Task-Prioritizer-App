@@ -1,50 +1,27 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Plus, Search, Trash2, Pencil, CheckCircle2, Download, Upload, Filter, Save, X, Calendar, ChevronDown, ArrowUpDown } from "lucide-react";
+import {
+  Plus, Search, Trash2, Pencil, CheckCircle2, Download, Upload,
+  Filter, Save, X, Calendar, ChevronDown, ArrowUpDown
+} from "lucide-react";
 
-// Types
-export type Priority = "Low" | "Normal" | "High" | "Urgent";
-export type Status = "Todo" | "In Progress" | "Done";
-
-export type Task = {
-  id: string;
-  title: string;
-  notes?: string;
-  priority: Priority;
-  status: Status;
-  due?: string; // ISO yyyy-mm-dd
-  createdAt: string; // ISO
-  updatedAt: string; // ISO
-};
-
-const PRIORITY_ORDER: Record<Priority, number> = {
-  Low: 0,
-  Normal: 1,
-  High: 2,
-  Urgent: 3,
-};
-
-const STATUS_ORDER: Record<Status, number> = {
-  Todo: 0,
-  "In Progress": 1,
-  Done: 2,
-};
+// Priority & status orders (for sorting)
+const PRIORITY_ORDER = { Low: 0, Normal: 1, High: 2, Urgent: 3 };
+const STATUS_ORDER = { "Todo": 0, "In Progress": 1, "Done": 2 };
 
 function uid() {
-  return (
-    Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
-  ).toUpperCase();
+  return (Date.now().toString(36) + Math.random().toString(36).slice(2, 8)).toUpperCase();
 }
 
 const STORAGE_KEY = "task_prioritizer_v1";
 
 export default function TaskPrioritizerApp() {
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasks, setTasks] = useState([]);
   const [q, setQ] = useState("");
-  const [priorityFilter, setPriorityFilter] = useState<Priority | "All">("All");
-  const [statusFilter, setStatusFilter] = useState<Status | "All">("All");
-  const [sortBy, setSortBy] = useState<"priority" | "due" | "created" | "status">("priority");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [editing, setEditing] = useState<Task | null>(null);
+  const [priorityFilter, setPriorityFilter] = useState("All");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [sortBy, setSortBy] = useState("priority");   // "priority" | "due" | "created" | "status"
+  const [sortDir, setSortDir] = useState("desc");     // "asc" | "desc"
+  const [editing, setEditing] = useState(null);
   const [showForm, setShowForm] = useState(false);
 
   // Load / Save
@@ -83,8 +60,7 @@ export default function TaskPrioritizerApp() {
       if (sortBy === "priority") {
         cmp = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
       } else if (sortBy === "due") {
-        // Put empty due dates last
-        const ad = a.due ? new Date(a.due).getTime() : Infinity;
+        const ad = a.due ? new Date(a.due).getTime() : Infinity; // empty due last
         const bd = b.due ? new Date(b.due).getTime() : Infinity;
         cmp = ad - bd;
       } else if (sortBy === "created") {
@@ -104,7 +80,7 @@ export default function TaskPrioritizerApp() {
     return { total, done, high };
   }, [tasks]);
 
-  function upsertTask(input: Partial<Task>) {
+  function upsertTask(input) {
     const now = new Date().toISOString();
     if (editing) {
       setTasks((prev) =>
@@ -114,8 +90,8 @@ export default function TaskPrioritizerApp() {
                 ...t,
                 title: input.title ?? t.title,
                 notes: input.notes ?? t.notes,
-                priority: (input.priority as Priority) ?? t.priority,
-                status: (input.status as Status) ?? t.status,
+                priority: input.priority ?? t.priority,
+                status: input.status ?? t.status,
                 due: input.due === undefined ? t.due : input.due || undefined,
                 updatedAt: now,
               }
@@ -126,12 +102,12 @@ export default function TaskPrioritizerApp() {
       setShowForm(false);
       return;
     }
-    const newTask: Task = {
+    const newTask = {
       id: uid(),
       title: (input.title || "Untitled").trim(),
       notes: input.notes || "",
-      priority: (input.priority as Priority) || "Normal",
-      status: (input.status as Status) || "Todo",
+      priority: input.priority || "Normal",
+      status: input.status || "Todo",
       due: input.due || undefined,
       createdAt: now,
       updatedAt: now,
@@ -140,11 +116,11 @@ export default function TaskPrioritizerApp() {
     setShowForm(false);
   }
 
-  function removeTask(id: string) {
+  function removeTask(id) {
     setTasks((prev) => prev.filter((t) => t.id !== id));
   }
 
-  function toggleDone(id: string) {
+  function toggleDone(id) {
     setTasks((prev) =>
       prev.map((t) =>
         t.id === id
@@ -164,61 +140,30 @@ export default function TaskPrioritizerApp() {
     URL.revokeObjectURL(url);
   }
 
-  function importJSON(file: File) {
+  function importJSON(file) {
     const reader = new FileReader();
     reader.onload = () => {
       try {
         const data = JSON.parse(String(reader.result));
         if (!Array.isArray(data)) throw new Error("Invalid file");
-        // Basic shape check
-        const clean: Task[] = data
+        const clean = data
           .filter((d) => d && d.id && d.title)
           .map((d) => ({
             id: String(d.id),
             title: String(d.title),
             notes: d.notes ? String(d.notes) : "",
-            priority: (['Low','Normal','High','Urgent'].includes(d.priority) ? d.priority : 'Normal') as Priority,
-            status: (['Todo','In Progress','Done'].includes(d.status) ? d.status : 'Todo') as Status,
+            priority: ["Low", "Normal", "High", "Urgent"].includes(d.priority) ? d.priority : "Normal",
+            status: ["Todo", "In Progress", "Done"].includes(d.status) ? d.status : "Todo",
             due: d.due ? String(d.due) : undefined,
             createdAt: d.createdAt ? String(d.createdAt) : new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           }));
         setTasks(clean);
       } catch (e) {
-        alert("Could not import: " + (e as Error).message);
+        alert("Could not import: " + e.message);
       }
     };
     reader.readAsText(file);
-  }
-
-  function PriorityBadge({ p }: { p: Priority }) {
-    const color =
-      p === "Urgent"
-        ? "bg-red-100 text-red-700 border-red-200"
-        : p === "High"
-        ? "bg-orange-100 text-orange-700 border-orange-200"
-        : p === "Normal"
-        ? "bg-blue-100 text-blue-700 border-blue-200"
-        : "bg-slate-100 text-slate-700 border-slate-200";
-    return (
-      <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${color}`}>
-        {p}
-      </span>
-    );
-  }
-
-  function StatusBadge({ s }: { s: Status }) {
-    const color =
-      s === "Done"
-        ? "bg-emerald-100 text-emerald-700 border-emerald-200"
-        : s === "In Progress"
-        ? "bg-violet-100 text-violet-700 border-violet-200"
-        : "bg-slate-100 text-slate-700 border-slate-200";
-    return (
-      <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${color}`}>
-        {s}
-      </span>
-    );
   }
 
   return (
@@ -280,61 +225,14 @@ export default function TaskPrioritizerApp() {
 
           <div className="md:col-span-7">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <div className="relative">
-                <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <select
-                  value={priorityFilter}
-                  onChange={(e) => setPriorityFilter(e.target.value as any)}
-                  className="w-full appearance-none rounded-2xl border px-9 py-2 text-sm outline-none ring-slate-200 focus:ring"
-                >
-                  <option value="All">All priorities</option>
-                  <option value="Urgent">Urgent</option>
-                  <option value="High">High</option>
-                  <option value="Normal">Normal</option>
-                  <option value="Low">Low</option>
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              </div>
-              <div className="relative">
-                <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as any)}
-                  className="w-full appearance-none rounded-2xl border px-9 py-2 text-sm outline-none ring-slate-200 focus:ring"
-                >
-                  <option value="All">All status</option>
-                  <option value="Todo">Todo</option>
-                  <option value="In Progress">In Progress</option>
-                  <option value="Done">Done</option>
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              </div>
-              <div className="relative">
-                <ArrowUpDown className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as any)}
-                  className="w-full appearance-none rounded-2xl border px-9 py-2 text-sm outline-none ring-slate-200 focus:ring"
-                >
-                  <option value="priority">Sort by priority</option>
-                  <option value="due">Sort by due date</option>
-                  <option value="created">Sort by created</option>
-                  <option value="status">Sort by status</option>
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              </div>
-              <div className="relative">
-                <ArrowUpDown className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <select
-                  value={sortDir}
-                  onChange={(e) => setSortDir(e.target.value as any)}
-                  className="w-full appearance-none rounded-2xl border px-9 py-2 text-sm outline-none ring-slate-200 focus:ring"
-                >
-                  <option value="desc">Desc</option>
-                  <option value="asc">Asc</option>
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              </div>
+              <Select value={priorityFilter} onChange={setPriorityFilter} label="All priorities"
+                      options={["All","Urgent","High","Normal","Low"]} />
+              <Select value={statusFilter} onChange={setStatusFilter} label="All status"
+                      options={["All","Todo","In Progress","Done"]} />
+              <Select value={sortBy} onChange={setSortBy} label="Sort by priority"
+                      options={["priority","due","created","status"]} icon={<ArrowUpDown className="h-4 w-4" />} />
+              <Select value={sortDir} onChange={setSortDir} label="Desc"
+                      options={["desc","asc"]} icon={<ArrowUpDown className="h-4 w-4" />} />
             </div>
           </div>
         </div>
@@ -351,7 +249,8 @@ export default function TaskPrioritizerApp() {
           {sorted.length === 0 ? (
             <div className="rounded-2xl border border-dashed p-8 text-center text-slate-500">
               No tasks found. Create your first task!
-            </div>) : null}
+            </div>
+          ) : null}
 
           {sorted.map((t) => (
             <div key={t.id} className="group rounded-2xl border bg-white p-4 shadow-sm transition hover:shadow-md">
@@ -380,10 +279,7 @@ export default function TaskPrioritizerApp() {
 
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => {
-                      setEditing(t);
-                      setShowForm(true);
-                    }}
+                    onClick={() => { setEditing(t); setShowForm(true); }}
                     className="inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs font-medium hover:bg-slate-50"
                   >
                     <Pencil className="h-4 w-4" /> Edit
@@ -405,14 +301,10 @@ export default function TaskPrioritizerApp() {
         </div>
       </main>
 
-      {/* Drawer Form */}
       {showForm && (
         <TaskForm
           initial={editing || undefined}
-          onClose={() => {
-            setShowForm(false);
-            setEditing(null);
-          }}
+          onClose={() => { setShowForm(false); setEditing(null); }}
           onSubmit={(data) => upsertTask(data)}
         />
       )}
@@ -424,7 +316,7 @@ export default function TaskPrioritizerApp() {
   );
 }
 
-function StatCard({ label, value, subtitle }: { label: string; value: number | string; subtitle?: string }) {
+function StatCard({ label, value, subtitle }) {
   return (
     <div className="rounded-2xl border bg-white p-4 shadow-sm">
       <div className="text-xs text-slate-500">{label}</div>
@@ -434,14 +326,57 @@ function StatCard({ label, value, subtitle }: { label: string; value: number | s
   );
 }
 
-function TaskForm({ initial, onClose, onSubmit }: { initial?: Task; onClose: () => void; onSubmit: (t: Partial<Task>) => void }) {
+function Select({ value, onChange, label, options, icon }) {
+  return (
+    <div className="relative">
+      {icon ? icon : <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />}
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full appearance-none rounded-2xl border px-9 py-2 text-sm outline-none ring-slate-200 focus:ring"
+      >
+        {options.map((opt) => (
+          <option key={opt} value={opt}>{opt === "priority" ? "Sort by priority" : opt}</option>
+        ))}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+    </div>
+  );
+}
+
+function PriorityBadge({ p }) {
+  const color =
+    p === "Urgent" ? "bg-red-100 text-red-700 border-red-200"
+      : p === "High" ? "bg-orange-100 text-orange-700 border-orange-200"
+      : p === "Normal" ? "bg-blue-100 text-blue-700 border-blue-200"
+      : "bg-slate-100 text-slate-700 border-slate-200";
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${color}`}>
+      {p}
+    </span>
+  );
+}
+
+function StatusBadge({ s }) {
+  const color =
+    s === "Done" ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+      : s === "In Progress" ? "bg-violet-100 text-violet-700 border-violet-200"
+      : "bg-slate-100 text-slate-700 border-slate-200";
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${color}`}>
+      {s}
+    </span>
+  );
+}
+
+function TaskForm({ initial, onClose, onSubmit }) {
   const [title, setTitle] = useState(initial?.title || "");
   const [notes, setNotes] = useState(initial?.notes || "");
-  const [priority, setPriority] = useState<Priority>(initial?.priority || "Normal");
-  const [status, setStatus] = useState<Status>(initial?.status || "Todo");
-  const [due, setDue] = useState<string>(initial?.due || "");
+  const [priority, setPriority] = useState(initial?.priority || "Normal");
+  const [status, setStatus] = useState(initial?.status || "Todo");
+  const [due, setDue] = useState(initial?.due || "");
 
-  function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e) {
     e.preventDefault();
     if (!title.trim()) {
       alert("Title is required");
@@ -490,13 +425,10 @@ function TaskForm({ initial, onClose, onSubmit }: { initial?: Task; onClose: () 
               <label className="mb-1 block text-xs font-medium">Priority</label>
               <select
                 value={priority}
-                onChange={(e) => setPriority(e.target.value as Priority)}
+                onChange={(e) => setPriority(e.target.value)}
                 className="w-full appearance-none rounded-2xl border px-3 py-2 text-sm outline-none ring-slate-200 focus:ring"
               >
-                <option>Urgent</option>
-                <option>High</option>
-                <option>Normal</option>
-                <option>Low</option>
+                {["Urgent", "High", "Normal", "Low"].map((p) => <option key={p}>{p}</option>)}
               </select>
               <ChevronDown className="pointer-events-none absolute right-3 top-9 h-4 w-4 text-slate-400" />
             </div>
@@ -504,12 +436,10 @@ function TaskForm({ initial, onClose, onSubmit }: { initial?: Task; onClose: () 
               <label className="mb-1 block text-xs font-medium">Status</label>
               <select
                 value={status}
-                onChange={(e) => setStatus(e.target.value as Status)}
+                onChange={(e) => setStatus(e.target.value)}
                 className="w-full appearance-none rounded-2xl border px-3 py-2 text-sm outline-none ring-slate-200 focus:ring"
               >
-                <option>Todo</option>
-                <option>In Progress</option>
-                <option>Done</option>
+                {["Todo", "In Progress", "Done"].map((s) => <option key={s}>{s}</option>)}
               </select>
               <ChevronDown className="pointer-events-none absolute right-3 top-9 h-4 w-4 text-slate-400" />
             </div>
