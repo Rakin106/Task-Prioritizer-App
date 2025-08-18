@@ -237,12 +237,13 @@ export default function TaskPrioritizerApp() {
           </div>
         </div>
 
-        {/* Stats */}
-        <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <StatCard label="Total Tasks" value={stats.total} subtitle="All tasks stored locally" />
-          <StatCard label="High & Urgent" value={stats.high} subtitle="Needs attention" />
-          <StatCard label="Completed" value={stats.done} subtitle="Marked as done" />
-        </div>
+        {{/* Stats */}
+<div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+  <StatCard label="Total Tasks" value={stats.total} subtitle="All tasks stored locally" />
+  <StatCard label="High & Urgent" value={stats.high} subtitle="Needs attention" />
+  <StatCard label="Completed" value={stats.done} subtitle="Marked as done" />
+</div>
+
 
         {/* List */}
         <div className="grid grid-cols-1 gap-3">
