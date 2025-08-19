@@ -4,6 +4,10 @@ import {
   Filter, Save, X, Calendar, ChevronDown, ArrowUpDown
 } from "lucide-react";
 import './App.css';
+import { useAuth, login, register, logout } from "./hooks/useAuth";
+import { useTasks, createTask, updateTask, deleteTaskCloud } from "./hooks/useTasks";
+import { SyncStatus } from "./components/SyncStatus";
+import { signIn as firebaseSignIn, register as firebaseRegister, logout as firebaseLogout, signInWithGoogle, signInWithGithub } from "./firebase";
 
 // Priority & status orders (for sorting)
 const PRIORITY_ORDER = { Low: 0, Normal: 1, High: 2, Urgent: 3 };
@@ -25,27 +29,24 @@ const DEFAULT_THEME = {
 };
 
 export default function TaskPrioritizerApp() {
-  const [tasks, setTasks] = useState([]);
+  const user = useAuth();
+  const { tasks, setTasks } = useTasks(user?.uid);
   const [q, setQ] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
   const [sortBy, setSortBy] = useState("priority");   // "Priority" | "Due" | "Created" | "Status"
-  const [sortDir, setSortDir] = useState("Desc");     // "Asc" | "Desc"
+  const [sortDir, setSortDir] = useState("desc");     // "asc" | "desc"
   const [editing, setEditing] = useState(null);
   const [showForm, setShowForm] = useState(false);
+  const [showSignIn, setShowSignIn] = useState(false);
 
   // theme
   const [theme, setTheme] = useState(DEFAULT_THEME);
   const [showTheme, setShowTheme] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
 
   // Load / Save tasks + theme
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setTasks(JSON.parse(raw));
-    } catch (e) {
-      console.error("Failed to load tasks", e);
-    }
     try {
       const traw = localStorage.getItem(THEME_KEY);
       if (traw) setTheme(JSON.parse(traw));
@@ -53,14 +54,6 @@ export default function TaskPrioritizerApp() {
       console.error("Failed to load theme", e);
     }
   }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
-    } catch (e) {
-      console.error("Failed to save tasks", e);
-    }
-  }, [tasks]);
 
   useEffect(() => {
     try {
@@ -108,54 +101,51 @@ export default function TaskPrioritizerApp() {
     return { total, done, high };
   }, [tasks]);
 
-  function upsertTask(input) {
-    const now = new Date().toISOString();
-    if (editing) {
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === editing.id
-            ? {
-                ...t,
-                title: input.title ?? t.title,
-                notes: input.notes ?? t.notes,
-                priority: input.priority ?? t.priority,
-                status: input.status ?? t.status,
-                due: input.due === undefined ? t.due : input.due || undefined,
-                updatedAt: now,
-              }
-            : t
-        )
-      );
-      setEditing(null);
-      setShowForm(false);
-      return;
+  async function upsertTask(task) {
+    try {
+      if (user) {
+        if (task.id) {
+          await updateTask(user.uid, task.id, task);
+        } else {
+          await createTask(user.uid, task);
+        }
+        // after write, Firestore onSnapshot will update local `tasks` via useTasks hook
+      } else {
+        // fallback: local-only behavior (keep your existing localStorage logic)
+        saveTaskLocally(task);
+      }
+    } catch (err) {
+      console.error("upsertTask error:", err);
+      // show UI error/toast if desired
     }
-    const newTask = {
-      id: uid(),
-      title: (input.title || "Untitled").trim(),
-      notes: input.notes || "",
-      priority: input.priority || "Normal",
-      status: input.status || "Todo",
-      due: input.due || undefined,
-      createdAt: now,
-      updatedAt: now,
-    };
-    setTasks((prev) => [newTask, ...prev]);
-    setShowForm(false);
   }
 
-  function removeTask(id) {
-    setTasks((prev) => prev.filter((t) => t.id !== id));
+  async function removeTask(id) {
+    try {
+      if (user) {
+        await deleteTaskCloud(user.uid, id);
+      } else {
+        removeTaskLocally(id);
+      }
+    } catch (err) {
+      console.error("removeTask error:", err);
+    }
   }
 
-  function toggleDone(id) {
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === id
-          ? { ...t, status: t.status === "Done" ? "Todo" : "Done", updatedAt: new Date().toISOString() }
-          : t
-      )
-    );
+  async function toggleDone(id) {
+    try {
+      const t = tasks.find(x => x.id === id);
+      if (!t) return;
+      const newStatus = t.status === "Done" ? "Todo" : "Done";
+      if (user) {
+        await updateTask(user.uid, id, { status: newStatus });
+      } else {
+        // local update
+        toggleDoneLocally(id);
+      }
+    } catch (err) {
+      console.error("toggleDone error:", err);
+    }
   }
 
   function exportJSON() {
@@ -186,7 +176,7 @@ export default function TaskPrioritizerApp() {
             createdAt: d.createdAt ? String(d.createdAt) : new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           }));
-        setTasks(clean);
+        clean.forEach((task) => createTask(task));
       } catch (e) {
         alert("Could not import: " + e.message);
       }
@@ -213,13 +203,16 @@ export default function TaskPrioritizerApp() {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowForm(true)}
-              className="inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90"
-              style={{ backgroundColor: theme.accent, borderColor: theme.accent }}
-            >
-              <Plus className="h-4 w-4" /> New Task
-            </button>
+            <div className="inline-flex items-center gap-3">
+              <button
+                onClick={() => setShowForm(true)}
+                className="inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90"
+                style={{ backgroundColor: theme.accent, borderColor: theme.accent }}
+                title="New Task"
+              >
+                <Plus className="h-4 w-4" /> New Task
+              </button>
+            </div>
 
             <button
               onClick={() => setShowTheme(true)}
@@ -249,6 +242,44 @@ export default function TaskPrioritizerApp() {
                 }}
               />
             </label>
+
+            {user ? (
+              <div className="relative">
+                <button
+                  onClick={() => setShowUserMenu((s) => !s)}
+                  className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm bg-white hover:shadow-sm"
+                  title={user.email}
+                  aria-haspopup="true"
+                  aria-expanded={showUserMenu}
+                >
+                  {/* show sync status inside the user button */}
+                  <span className="flex items-center gap-2">
+                    <SyncStatus uid={user?.uid} />
+                  </span>
+                  <span className="text-sm font-medium">Online</span>
+                  <ChevronDown className="h-4 w-4 text-slate-400" />
+                </button>
+
+                {showUserMenu && (
+                  <div className="absolute right-0 mt-2 w-56 rounded-xl border bg-white p-2 shadow-lg z-20">
+                    <div className="px-3 py-2 text-xs text-slate-500">Signed in as</div>
+                    <div className="px-3 py-2 text-sm font-medium break-words">{user.email}</div>
+                    <div className="mt-2 border-t pt-2">
+                      <button
+                        onClick={() => { firebaseLogout().catch(()=>{}); setShowUserMenu(false); }}
+                        className="w-full text-left rounded-lg px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                      >
+                        Sign out
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <button onClick={() => setShowSignIn(true)} className="inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm hover:bg-slate-50">
+                <span className="text-sm font-medium">Sign in</span>
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -364,8 +395,23 @@ export default function TaskPrioritizerApp() {
         />
       )}
 
-      <footer className="mx-auto max-w-6xl px-4 pb-10 pt-6 text-center text-xs text-slate-500">
-        Data is saved in your browser (localStorage). Use Export to back up.
+      {showSignIn && (
+        <SignInModal
+          onClose={() => setShowSignIn(false)}
+          onSuccess={() => setShowSignIn(false)}
+        />
+      )}
+
+      <footer className="mx-auto max-w-6xl px-4 pb-10 pt-6 text-xs text-slate-500">
+        <div className="flex items-center justify-between">
+          <div>Data is saved in your browser (localStorage). Use Export to back up.</div>
+          {user ? (
+            <div className="text-right">
+              <div className="text-xs text-slate-400">Signed in as</div>
+              <div className="text-sm font-medium break-words">{user.email}</div>
+            </div>
+          ) : null}
+        </div>
       </footer>
     </div>
   );
@@ -440,6 +486,44 @@ function TaskForm({ initial, onClose, onSubmit, theme }) {
   const [priority, setPriority] = useState(initial?.priority || "Normal");
   const [status, setStatus] = useState(initial?.status || "Todo");
   const [due, setDue] = useState(initial?.due || "");
+  const [time, setTime] = useState(initial?.time || "");          // new: time of day (HH:MM)
+  const [email, setEmail] = useState(initial?.email || "");       // new: contact email
+  const [location, setLocation] = useState(initial?.location || ""); // new: location string
+
+  const PRIORITY_META = {
+    Urgent: { bg: "bg-red-50", ring: "ring-red-300", text: "text-red-700", dot: "bg-red-500" },
+    High:   { bg: "bg-orange-50", ring: "ring-orange-200", text: "text-orange-700", dot: "bg-orange-500" },
+    Normal: { bg: "bg-blue-50", ring: "ring-blue-200", text: "text-blue-700", dot: "bg-blue-500" },
+    Low:    { bg: "bg-slate-50", ring: "ring-slate-200", text: "text-slate-700", dot: "bg-slate-400" },
+  };
+
+  function formatCountdown(targetIsoDate, targetTime) {
+    if (!targetIsoDate) return null;
+    try {
+      const datePart = new Date(targetIsoDate);
+      if (isNaN(datePart)) return null;
+      // If time provided, combine
+      let dt;
+      if (targetTime) {
+        const [hh, mm] = targetTime.split(":").map(Number);
+        dt = new Date(datePart);
+        dt.setHours(isNaN(hh) ? 0 : hh, isNaN(mm) ? 0 : mm, 0, 0);
+      } else {
+        dt = new Date(datePart);
+      }
+      const diff = dt.getTime() - Date.now();
+      if (isNaN(diff)) return null;
+      if (diff <= 0) return "Expired";
+      const days = Math.floor(diff / (1000*60*60*24));
+      const hours = Math.floor((diff % (1000*60*60*24)) / (1000*60*60));
+      const mins = Math.floor((diff % (1000*60*60)) / (1000*60));
+      if (days > 0) return `in ${days}d ${hours}h`;
+      if (hours > 0) return `in ${hours}h ${mins}m`;
+      return `in ${mins}m`;
+    } catch (e) {
+      return null;
+    }
+  }
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -447,86 +531,179 @@ function TaskForm({ initial, onClose, onSubmit, theme }) {
       alert("Title is required");
       return;
     }
-    onSubmit({ title, notes, priority, status, due: due || undefined });
+    const payload = {
+      ...(initial?.id ? { id: initial.id } : {}),
+      title: title.trim(),
+      notes,
+      priority,
+      status,
+      due: due || undefined,
+      time: time || undefined,
+      email: email || undefined,
+      location: location || undefined,
+    };
+    onSubmit(payload);
   }
 
+  const previewCountdown = formatCountdown(due, time);
+
   return (
-    <div className="fixed inset-0 z-50 flex">
-      <div className="hidden flex-1 bg-black/30 md:block" onClick={onClose} />
-      <div className="ml-auto flex h-full w-full max-w-xl flex-col border-l bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <div>
-            <h2 className="text-base font-semibold">{initial ? "Edit Task" : "New Task"}</h2>
-            <p className="text-xs text-slate-500">{initial ? "Update details and save" : "Fill in the details and save"}</p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+
+      <div className="relative z-10 w-full max-w-3xl rounded-2xl border bg-white shadow-xl">
+        <div className={`flex items-center justify-between border-b px-5 py-3 ${PRIORITY_META[priority].bg}`}>
+          <div className="flex items-center gap-3">
+            <span className={`inline-block h-3 w-3 rounded-full ${PRIORITY_META[priority].dot}`} />
+            <div>
+              <h2 className="text-base font-semibold">{initial ? "Edit Task" : "New Task"}</h2>
+              <p className="text-xs text-slate-500">{initial ? "Update details and save" : "Fill in the details and save"}</p>
+            </div>
           </div>
           <button onClick={onClose} className="rounded-xl border p-2 hover:bg-slate-50" title="Close">
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-4">
-          <div>
-            <label className="mb-1 block text-xs font-medium">Title *</label>
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g., Prepare MVD4 notes"
-              className="w-full rounded-2xl border px-3 py-2 text-sm outline-none ring-slate-200 focus:ring"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium">Notes</label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Details, links, checklists..."
-              rows={6}
-              className="w-full rounded-2xl border px-3 py-2 text-sm outline-none ring-slate-200 focus:ring"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="relative">
-              <label className="mb-1 block text-xs font-medium">Priority</label>
-              <select
-                value={priority}
-                onChange={(e) => setPriority(e.target.value)}
-                className="w-full appearance-none rounded-2xl border px-3 py-2 text-sm outline-none ring-slate-200 focus:ring"
-              >
-                {["Urgent", "High", "Normal", "Low"].map((p) => <option key={p}>{p}</option>)}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-3 top-9 h-4 w-4 text-slate-400" />
+        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-4 gap-6 px-6 py-6">
+          <div className="md:col-span-3 flex flex-col gap-4">
+            <div>
+              <label className="mb-2 block text-xs font-medium">Title *</label>
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g., Prepare MVD4 notes"
+                className="w-full rounded-lg border border-slate-200 px-4 py-3 text-sm shadow-sm outline-none transition focus:shadow-md focus:ring-2"
+              />
             </div>
-            <div className="relative">
-              <label className="mb-1 block text-xs font-medium">Status</label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value)}
-                className="w-full appearance-none rounded-2xl border px-3 py-2 text-sm outline-none ring-slate-200 focus:ring"
-              >
-                {["Todo", "In Progress", "Done"].map((s) => <option key={s}>{s}</option>)}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-3 top-9 h-4 w-4 text-slate-400" />
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="mb-2 block text-xs font-medium">Contact email</label>
+                <input
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="team@company.com"
+                  type="email"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-xs font-medium">Location</label>
+                <input
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  placeholder="Meeting room / Address"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-xs font-medium">Notes</label>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Details, links, checklists..."
+                rows={5}
+                className="w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="mb-2 block text-xs font-medium">Priority</label>
+                <div className="flex flex-wrap gap-2">
+                  {["Urgent","High","Normal","Low"].map((p) => {
+                    const meta = PRIORITY_META[p];
+                    const active = p === priority;
+                    return (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => setPriority(p)}
+                        aria-pressed={active}
+                        className={`flex-shrink-0 flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition ${active ? `${meta.bg} ${meta.text} ring-2 ${meta.ring}` : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                      >
+                        <span className={`inline-block h-2 w-2 rounded-full ${meta.dot}`} />
+                        {p}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-xs font-medium">Status</label>
+                <div className="flex flex-wrap gap-2">
+                  {["Todo","In Progress","Done"].map((s) => {
+                    const active = s === status;
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setStatus(s)}
+                        aria-pressed={active}
+                        className={`flex-shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${active ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                      >
+                        {s}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4">
+              <div className="flex-1">
+                <label className="mb-2 block text-xs font-medium">Due date</label>
+                <input
+                  type="date"
+                  value={due}
+                  onChange={(e) => setDue(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 px-4 py-2 text-sm"
+                />
+              </div>
+
+              <div className="w-36">
+                <label className="mb-2 block text-xs font-medium">Time</label>
+                <input
+                  type="time"
+                  value={time}
+                  onChange={(e) => setTime(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="mt-auto flex justify-end gap-3 border-t pt-4">
+              <button type="button" onClick={onClose} className="rounded-lg border px-4 py-2 text-sm hover:bg-slate-50">
+                Cancel
+              </button>
+              <button type="submit" className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white" style={{ backgroundColor: theme?.accent || '#0f172a' }}>
+                <Save className="h-4 w-4" /> {initial ? "Save changes" : "Create task"}
+              </button>
             </div>
           </div>
 
-          <div>
-            <label className="mb-1 block text-xs font-medium">Due date</label>
-            <input
-              type="date"
-              value={due}
-              onChange={(e) => setDue(e.target.value)}
-              className="w-full rounded-2xl border px-3 py-2 text-sm outline-none ring-slate-200 focus:ring"
-            />
-          </div>
-
-          <div className="mt-auto flex justify-end gap-2 border-t pt-3">
-            <button type="button" onClick={onClose} className="rounded-2xl border px-4 py-2 text-sm hover:bg-slate-50">
-              Cancel
-            </button>
-            <button type="submit" className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">
-              <Save className="h-4 w-4" /> {initial ? "Save changes" : "Create task"}
-            </button>
+          <div className="md:col-span-1">
+            <label className="mb-2 block text-xs font-medium invisible md:visible">Preview</label>
+            <div className="rounded-xl border px-3 py-3 text-sm">
+              <div className="flex items-center justify-between">
+                <div className="flex flex-col">
+                  <div className="flex items-center gap-2">
+                    <span className={`inline-block h-2 w-2 rounded-full ${PRIORITY_META[priority].dot}`} />
+                    <div className="text-sm font-medium">{title || "Untitled task"}</div>
+                  </div>
+                  {email ? <div className="text-xs text-slate-500 mt-1">{email}</div> : null}
+                  {location ? <div className="text-xs text-slate-500">{location}</div> : null}
+                </div>
+                <div className="text-xs text-slate-500">{status}</div>
+              </div>
+              {due ? <div className="mt-2 text-xs text-slate-400">{previewCountdown ? previewCountdown : `Due ${due}${time ? ' ' + time : ''}`}</div> : null}
+              {notes ? <div className="mt-3 text-xs text-slate-600 line-clamp-4">{notes}</div> : null}
+            </div>
           </div>
         </form>
       </div>
@@ -586,6 +763,119 @@ function ThemeSettings({ theme, onClose, onSave }) {
             <Save className="h-4 w-4" /> Save
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// New SignInModal component
+function SignInModal({ onClose, onSuccess }) {
+  const [isRegister, setIsRegister] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setErr("");
+    setLoading(true);
+    try {
+      if (isRegister) {
+        await firebaseRegister(email, password);
+      } else {
+        await firebaseSignIn(email, password);
+      }
+      setLoading(false);
+      onSuccess();
+    } catch (e) {
+      setErr(e?.message || "Auth failed");
+      setLoading(false);
+    }
+  }
+
+  async function handleSocialSignIn(providerFn) {
+    setErr("");
+    setLoading(true);
+    try {
+      await providerFn();
+      setLoading(false);
+      onSuccess();
+    } catch (e) {
+      setErr(e?.message || "Social sign-in failed");
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+      <div className="relative w-full max-w-md rounded-2xl border bg-white p-6 shadow-xl z-10">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-base font-semibold">{isRegister ? "Create account" : "Sign in to your account"}</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+
+        <div className="grid gap-2">
+          <button
+            onClick={() => handleSocialSignIn(signInWithGoogle)}
+            className="auth-btn provider google inline-flex items-center gap-2 justify-center rounded-2xl border px-3 py-2 text-sm"
+            disabled={loading}
+            title="Continue with Google"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg"><path fill="#4285f4" d="M533.5 278.4c0-18.8-1.6-37-4.6-54.6H272v103.3h147.1c-6.4 34.6-25.9 64-55.3 83.6v69.5h89.2c52.2-48 82.5-119 82.5-201.8z"/><path fill="#34a853" d="M272 544.3c74 0 136-24.5 181.3-66.4l-89.2-69.5c-24.7 16.6-56.4 26.4-92.1 26.4-70.8 0-130.8-47.8-152.3-112.1H29.7v70.7C74.8 486.6 167.6 544.3 272 544.3z"/><path fill="#fbbc04" d="M119.7 325.3c-10.8-31.5-10.8-65.8 0-97.3V157.3H29.7c-40.9 81.9-40.9 179.8 0 261.7l90-93.7z"/><path fill="#ea4335" d="M272 107.6c39.9 0 75.8 13.7 104.1 40.6l78-78C409.6 24.8 346.6 0 272 0 167.6 0 74.8 57.7 29.7 157.3l90 70.6C141.2 155.4 201.2 107.6 272 107.6z"/></svg>
+            <span>Continue with Google</span>
+          </button>
+
+          <button
+            onClick={() => handleSocialSignIn(signInWithGithub)}
+            className="auth-btn provider github inline-flex items-center gap-2 justify-center rounded-2xl border px-3 py-2 text-sm"
+            disabled={loading}
+            title="Continue with GitHub"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55 0-.27-.01-1.16-.01-2.1-3.2.7-3.88-1.38-3.88-1.38-.53-1.37-1.3-1.74-1.3-1.74-1.06-.72.08-.71.08-.71 1.17.08 1.78 1.2 1.78 1.2 1.04 1.78 2.73 1.27 3.4.97.11-.76.41-1.27.74-1.56-2.56-.29-5.26-1.28-5.26-5.72 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11.05 11.05 0 0 1 5.79 0c2.2-1.5 3.17-1.18 3.17-1.18.63 1.59.24 2.76.12 3.05.74.81 1.18 1.84 1.18 3.1 0 4.45-2.7 5.42-5.28 5.7.42.36.79 1.07.79 2.16 0 1.56-.01 2.82-.01 3.2 0 .3.21.66.8.55C20.71 21.39 24 17.08 24 12c0-6.35-5.15-11.5-12-11.5z"/></svg>
+            <span>Continue with GitHub</span>
+          </button>
+        </div>
+
+        <div className="my-4 border-t pt-4 text-center text-xs text-slate-400">Or use your email</div>
+
+        <form onSubmit={handleSubmit} className="grid gap-3">
+          <input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Email"
+            className="w-full rounded-2xl border px-3 py-2 text-sm"
+            type="email"
+            required
+          />
+          <input
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            type="password"
+            placeholder="Password"
+            className="w-full rounded-2xl border px-3 py-2 text-sm"
+            required
+          />
+
+          {err ? <div className="text-xs text-red-600">{err}</div> : null}
+
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-xs text-slate-500">
+              {isRegister ? "Already have an account?" : "Don't have an account?"}
+              <button type="button" onClick={() => setIsRegister(!isRegister)} className="ml-2 text-sky-600 underline">
+                {isRegister ? "Sign in" : "Create account"}
+              </button>
+            </div>
+
+            <div className="flex gap-2">
+              <button type="button" onClick={onClose} className="rounded-2xl border px-4 py-2 text-sm hover:bg-slate-50">Cancel</button>
+              <button type="submit" disabled={loading} className="rounded-2xl bg-slate-900 px-4 py-2 text-sm text-white">
+                {loading ? (isRegister ? "Creating…" : "Signing in…") : (isRegister ? "Create" : "Sign in")}
+              </button>
+            </div>
+          </div>
+        </form>
       </div>
     </div>
   );

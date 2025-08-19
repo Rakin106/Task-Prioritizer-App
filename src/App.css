@@ -57,3 +57,38 @@ button {
   display: inline-flex;
   align-items: center;
 }
+
+/* Auth / provider buttons */
+.auth-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid #e6e9ee;
+  background: #fff;
+  color: #111827;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+.auth-btn:disabled { opacity: 0.6; cursor: default; }
+
+.auth-btn.provider svg { display: inline-flex; }
+
+.auth-btn.provider.google { border-color: #e6e9ee; }
+.auth-btn.provider.github { border-color: #e6e9ee; }
+
+/* small adjustments so sync-badge appears before New Task visually */
+.sync-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 8px;
+  margin-left: 0;
+}
+
+/* small user chip */
+.user-chip {
+  gap: 8px;
+  white-space: nowrap;
+}
