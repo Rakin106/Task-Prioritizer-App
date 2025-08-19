@@ -3,6 +3,7 @@ import {
   Plus, Search, Trash2, Pencil, CheckCircle2, Download, Upload,
   Filter, Save, X, Calendar, ChevronDown, ArrowUpDown
 } from "lucide-react";
+import './App.css';
 
 // Priority & status orders (for sorting)
 const PRIORITY_ORDER = { Low: 0, Normal: 1, High: 2, Urgent: 3 };
@@ -13,24 +14,43 @@ function uid() {
 }
 
 const STORAGE_KEY = "task_prioritizer_v1";
+const THEME_KEY = "task_prioritizer_theme_v1";
+
+// default theme (used for reset and initial state)
+const DEFAULT_THEME = {
+  accent: "#0f172a", // default slate-900
+  font: 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial',
+  bgFrom: "#f8fafc",
+  bgTo: "#ffffff",
+};
 
 export default function TaskPrioritizerApp() {
   const [tasks, setTasks] = useState([]);
   const [q, setQ] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
-  const [sortBy, setSortBy] = useState("priority");   // "priority" | "due" | "created" | "status"
-  const [sortDir, setSortDir] = useState("desc");     // "asc" | "desc"
+  const [sortBy, setSortBy] = useState("priority");   // "Priority" | "Due" | "Created" | "Status"
+  const [sortDir, setSortDir] = useState("Desc");     // "Asc" | "Desc"
   const [editing, setEditing] = useState(null);
   const [showForm, setShowForm] = useState(false);
 
-  // Load / Save
+  // theme
+  const [theme, setTheme] = useState(DEFAULT_THEME);
+  const [showTheme, setShowTheme] = useState(false);
+
+  // Load / Save tasks + theme
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) setTasks(JSON.parse(raw));
     } catch (e) {
       console.error("Failed to load tasks", e);
+    }
+    try {
+      const traw = localStorage.getItem(THEME_KEY);
+      if (traw) setTheme(JSON.parse(traw));
+    } catch (e) {
+      console.error("Failed to load theme", e);
     }
   }, []);
 
@@ -41,6 +61,14 @@ export default function TaskPrioritizerApp() {
       console.error("Failed to save tasks", e);
     }
   }, [tasks]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(THEME_KEY, JSON.stringify(theme));
+    } catch (e) {
+      console.error("Failed to save theme", e);
+    }
+  }, [theme]);
 
   const filtered = useMemo(() => {
     return tasks
@@ -167,7 +195,13 @@ export default function TaskPrioritizerApp() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white text-slate-900">
+    <div
+      className="min-h-screen text-slate-900"
+      style={{
+        background: `linear-gradient(180deg, ${theme.bgFrom} 0%, ${theme.bgTo} 100%)`,
+        fontFamily: theme.font,
+      }}
+    >
       <header className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
           <div className="flex items-center gap-3">
@@ -181,10 +215,21 @@ export default function TaskPrioritizerApp() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowForm(true)}
-              className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
+              className="inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90"
+              style={{ backgroundColor: theme.accent, borderColor: theme.accent }}
             >
               <Plus className="h-4 w-4" /> New Task
             </button>
+
+            <button
+              onClick={() => setShowTheme(true)}
+              className="inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm font-medium hover:bg-slate-50"
+              title="Appearance"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="h-4 w-4"><path d="M12 3v2M12 19v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              Appearance
+            </button>
+
             <button
               onClick={exportJSON}
               className="inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm font-medium hover:bg-slate-50"
@@ -307,6 +352,15 @@ export default function TaskPrioritizerApp() {
           initial={editing || undefined}
           onClose={() => { setShowForm(false); setEditing(null); }}
           onSubmit={(data) => upsertTask(data)}
+          theme={theme}
+        />
+      )}
+
+      {showTheme && (
+        <ThemeSettings
+          theme={theme}
+          onClose={() => setShowTheme(false)}
+          onSave={(t) => { setTheme(t); setShowTheme(false); }}
         />
       )}
 
@@ -328,17 +382,27 @@ function StatCard({ label, value, subtitle }) {
 }
 
 function Select({ value, onChange, label, options, icon }) {
+  const cap = (s) => (typeof s === "string" && s.length > 0) ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+
   return (
     <div className="relative">
-      {icon ? icon : <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />}
+      {icon ? (
+        // when an icon is provided by caller, place it absolutely like the default so alignment stays consistent
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+          {React.cloneElement(icon, { className: "h-4 w-4" })}
+        </span>
+      ) : (
+        <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+      )}
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="w-full appearance-none rounded-2xl border px-9 py-2 text-sm outline-none ring-slate-200 focus:ring"
       >
-        {options.map((opt) => (
-          <option key={opt} value={opt}>{opt === "priority" ? "Sort by priority" : opt}</option>
-        ))}
+        {options.map((opt) => {
+          const labelText = opt === "priority" ? "Sort by priority" : cap(opt);
+          return <option key={opt} value={opt}>{labelText}</option>;
+        })}
       </select>
       <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
     </div>
@@ -370,7 +434,7 @@ function StatusBadge({ s }) {
   );
 }
 
-function TaskForm({ initial, onClose, onSubmit }) {
+function TaskForm({ initial, onClose, onSubmit, theme }) {
   const [title, setTitle] = useState(initial?.title || "");
   const [notes, setNotes] = useState(initial?.notes || "");
   const [priority, setPriority] = useState(initial?.priority || "Normal");
@@ -465,6 +529,63 @@ function TaskForm({ initial, onClose, onSubmit }) {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// Theme settings modal
+function ThemeSettings({ theme, onClose, onSave }) {
+  const [accent, setAccent] = useState(theme.accent || DEFAULT_THEME.accent);
+  const [font, setFont] = useState(theme.font || DEFAULT_THEME.font);
+  const [bgFrom, setBgFrom] = useState(theme.bgFrom || DEFAULT_THEME.bgFrom);
+  const [bgTo, setBgTo] = useState(theme.bgTo || DEFAULT_THEME.bgTo);
+
+  function handleSave() {
+    onSave({ accent, font, bgFrom, bgTo });
+  }
+
+  function handleResetToDefault() {
+    // apply default immediately and persist
+    onSave(DEFAULT_THEME);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+      <div className="relative max-w-md rounded-2xl border bg-white p-4 shadow-xl">
+        <h3 className="mb-2 text-sm font-semibold">Appearance</h3>
+        <div className="mb-3 grid gap-3">
+          <div>
+            <label className="block text-xs font-medium">Accent color</label>
+            <input type="color" value={accent} onChange={(e)=>setAccent(e.target.value)} className="mt-1 h-9 w-12 rounded-md border" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium">Primary font</label>
+            <select value={font} onChange={(e)=>setFont(e.target.value)} className="mt-1 w-full rounded-2xl border px-3 py-2 text-sm">
+              <option value={'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto'}>Inter / System Sans</option>
+              <option value={'"Segoe UI", Tahoma, Geneva, Verdana, sans-serif'}>Segoe UI / Tahoma</option>
+              <option value={'Roboto, "Helvetica Neue", Arial, sans-serif'}>Roboto / Helvetica</option>
+              <option value={'Georgia, serif'}>Georgia</option>
+              <option value={'"Courier New", Courier, monospace'}>Courier New</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium">Background gradient (from)</label>
+            <input type="color" value={bgFrom} onChange={(e)=>setBgFrom(e.target.value)} className="mt-1 h-9 w-12 rounded-md border" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium">Background gradient (to)</label>
+            <input type="color" value={bgTo} onChange={(e)=>setBgTo(e.target.value)} className="mt-1 h-9 w-12 rounded-md border" />
+          </div>
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-2xl border px-4 py-2 text-sm hover:bg-slate-50">Cancel</button>
+          <button onClick={handleResetToDefault} className="rounded-2xl border px-4 py-2 text-sm hover:bg-slate-50">Reset to default</button>
+          <button onClick={handleSave} className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">
+            <Save className="h-4 w-4" /> Save
+          </button>
+        </div>
       </div>
     </div>
   );

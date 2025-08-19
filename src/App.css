@@ -1,0 +1,59 @@
+/* Main toolbar/row - ensure children are vertically centered */
+.toolbar,
+.search-row,
+.controls,
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Inputs/selects that contain icons */
+.search-input,
+.filter-select,
+.sort-select,
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Normalize SVG (lucide-react outputs plain SVG) */
+.toolbar svg,
+.search-input svg,
+.filter-select svg,
+.sort-select svg,
+.icon-btn svg,
+button svg {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.05em;   /* scale icons to match text height */
+  height: 1.05em;
+  vertical-align: middle;
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+/* Slight nudge for chevrons/arrows to match text baseline */
+.sort-select svg,
+.filter-select svg,
+.chevron {
+  transform: translateY(1px);
+}
+
+/* If you want the icon inside inputs to be absolutely positioned, use this pattern:
+.search-input { position: relative; }
+.search-input .icon-left { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+.search-input input { padding-left: 2.2rem; }
+*/
+
+/* Small responsive tweak so select caret and svg stay aligned */
+select,
+input,
+button {
+  line-height: 1;
+  font-size: 0.95rem;
+  display: inline-flex;
+  align-items: center;
+}
