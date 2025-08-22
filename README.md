@@ -23,7 +23,6 @@ All data is stored locally in the browser, with options to export and import JSO
 
 - **React** – UI framework  
 - **Tailwind CSS** – Styling  
-- **TypeScript** – Type safety  
-- **Lucide Icons** – Icon library  
+- **TypeScript** – Type safety   
 
 ---
