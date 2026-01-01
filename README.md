@@ -25,4 +25,4 @@ All data is stored locally in the browser, with options to export and import JSO
 - **Tailwind CSS** – Styling  
 - **TypeScript** – Type safety   
 
----
+
